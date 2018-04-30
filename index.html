@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+  <body>
+    <!--Intro content-->
+      <h1> Clustering Last.fm Users by top played artists with K-means</h1>
+      <h2 id = "cluster-num">Number of clusters: 29</h2>
+      <h6>Sometimes if you slide too quickly, the cluster labels disappear! :(</h6>
+      <input id = "select" type="range" min="5" max="30" step = "1" value = "30">
+      
+    <!--Visualization container-->
+      <div id = "viz"></div>
+  </body>
+</html>
+<meta charset="utf-8">
+
+<style>
+    body {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        height: 110vh;
+        width: 100%;
+        
+        font-family: "Maven Pro";
+    }
+    
+    .top {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 100px;
+    }
+    
+    #viz {
+        width: 50%;
+        height: 100%;
+        border-radius: 500px;
+    }
+
+    .node {
+      cursor: pointer;
+    }
+
+    .node:hover {
+      stroke: #000;
+      stroke-width: 3.6px;
+    }
+
+    .node--leaf {
+      fill: white;
+    }
+
+    .label {
+      font-family: "Maven Pro";
+      font-size: 12px;
+      text-anchor: middle;
+        z-index: 9999;
+    }
+
+    .label,
+    .node--root,
+    .node--leaf {
+      pointer-events: none;
+    }
+</style>
+
+<script src="https://d3js.org/d3.v4.min.js"></script>
+
+<script>
+    
+    var vizDiv = document.getElementById("viz");
+    var width = vizDiv.clientWidth;
+    var height = vizDiv.clientHeight;
+    
+    var svg = d3.select(vizDiv).append("svg");
+        svg
+          .attr("width", (width))
+          .attr("height", (height));
+        
+    var margin = 20;
+    var diameter = svg.attr("width");
+    var g = svg.append("g")
+                .attr("transform", "translate(" + diameter / 2 + "," + diameter / 2 + ")");
+
+    var color = d3.scaleLinear()
+        .domain([-1, 5])
+        .range(["hsl(152,80%,100%)", "hsl(228,30%,40%)"])
+        .interpolate(d3.interpolateHcl);
+
+    var pack = d3.pack()
+        .size([diameter - margin, diameter - margin])
+        .padding(10);
+    
+    // Adjust the data set based on the slider's value
+    // Initialize by calling update on 14
+    // for some reason initial call is a little empty so call it twice
+    update(30);
+    update(30);
+    
+    
+    // MARK: Update
+    // This function is called every time the slider is changed to pass in a new value of K
+    // from the KMeans data sets in order to visualize the sizes and artists in different 
+    // user clusters
+    function update(k) {
+        
+        // Grab the appropriate JSON file to display data
+        d3.json("data/clustered-users-" + k + "-20000-americans.json", function(error, root){
+          
+        if (error) {
+            console.error(error);
+            throw error;
+        }
+            
+        // transition
+        var t = d3.transition().duration(500);
+        
+        root = d3.hierarchy(root)
+          .sum(function(d) { return d.size; })
+          .sort(function(a, b) {
+            return b.value - a.value;
+        });
+        
+        var focus = root;
+        var nodes = pack(root).descendants();
+        var view;
+
+        // Bubble nodes
+        var circle = g.selectAll("circle")
+                      .data(nodes);
+        
+        // Text node labels
+        var text = g.selectAll("text")
+                    .data(nodes);
+    
+        // Exit
+        circle.exit().remove();
+        text.exit().remove();
+        
+        // Make the new circle nodes for update
+        var newCircles = circle
+            .enter()
+            .append("circle")
+            .merge(circle)
+
+        
+        // Make the new text nodes for update
+        var newText = text
+            .enter()
+            .append("text")
+            .merge(text)
+        
+    
+        // Merge the circles
+        newCircles
+            .attr("class", function(d) {
+                return d.parent ? d.children ? "node" : "node node--leaf" : "node node--root";
+            })
+            .style("fill", function(d) {
+                return d.children ? color(d.depth) : null;
+            })
+            .on("click", function(d) {
+                if (focus !== d) {
+                    zoom(d);
+                    d3.event.stopPropagation();
+                }
+            })
+                
+        // Add text labels to each node
+        newText
+              .attr("class", "label")
+              .style("fill-opacity", function(d) {
+                  return d.parent === root ? 1 : 0;
+              })
+              .style("display", function(d) {
+                  // if the node is internal, then have no text
+                  return d.parent === root ? "inline" : "none";
+              })
+              .style("z-index", function(d) {
+                  return d.parent === root ? "9999" : "1";
+              })
+              .text(function(d) {
+                    if(d.parent === root) {
+                    return d.data.name
+                  } else {
+                    return d.data.name + "," + d.data.size;
+                  }
+        })
+        
+        
+          var node = g.selectAll("circle,text");
+            
+        // Background click handler
+          svg.on("click", function() {
+                    zoom(root);
+          });
+
+          zoomTo([root.x, root.y, root.r * 2 + margin]);
+
+
+          function zoomTo(v) {
+            var k = diameter / v[2];
+            view = v;
+            node.attr("transform", function(d) {
+              return "translate(" + (d.x - v[0]) * k + "," + (d.y - v[1]) * k + ")";
+            });
+            circle.attr("r", function(d) { return d.r * k; });
+          }
+
+          function zoom(d) {
+            
+              var focus0 = focus;
+              focus = d;
+
+            var transition = d3.transition()
+                .duration(d3.event.altKey ? 7500 : 750)
+                .tween("zoom", function(d) {
+                  var i = d3.interpolateZoom(view, [focus.x, focus.y, focus.r * 2 + margin]);
+                  return function(t) { zoomTo(i(t)); };
+                });
+
+            transition.selectAll("text")
+              .filter(function(d) {
+                return d.parent === focus || this.style.display === "inline";
+                })
+                .style("fill-opacity", function(d) {
+                    return d.parent === focus ? 1 : 0;
+                    })
+
+                .on("start", function(d) { if (d.parent === focus) this.style.display = "inline"; })
+
+                .on("end", function(d) { if (d.parent !== focus) this.style.display = "none"; });
+          }
+
+        });
+        
+    }
+    
+    var select = d3.select('#select');
+    
+    select.on('input', function() {
+        console.log(this.value);
+        update(this.value);
+        d3.select('#cluster-num').html("Number of clusters: " + (this.value - 1));
+    })
+
+
+    
+</script>
